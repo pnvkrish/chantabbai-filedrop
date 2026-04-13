@@ -24,6 +24,9 @@
     "tesseract.js": "^7.0.0",
     "xlsx": "^0.18.5"
   },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4.0.0",
