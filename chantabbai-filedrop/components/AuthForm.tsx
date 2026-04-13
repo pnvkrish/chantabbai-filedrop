@@ -2,147 +2,95 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Logo } from './Logo'
-import { supabase } from '@/lib/supabase/client'
+import Image from 'next/image'
+
+const USERS = [
+  { username: 'pavan',  password: 'pavan.9000', isOwner: true,  userId: '00000000-0000-0000-0000-000000000001' },
+  { username: 'viewer', password: 'view.001',   isOwner: false, userId: '00000000-0000-0000-0000-000000000002' },
+]
 
 export function AuthForm() {
   const router = useRouter()
-  const [mode, setMode] = useState<'login' | 'signup'>('login')
-  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
+  const [error, setError]       = useState('')
+  const [loading, setLoading]   = useState(false)
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
-    setSuccess('')
-
-    if (!email || !password) {
-      setError('Email and password are required')
+    setLoading(true)
+    const user = USERS.find(u => u.username === username.trim() && u.password === password)
+    if (!user) {
+      setError('Invalid username or password')
+      setLoading(false)
       return
     }
-
-    setLoading(true)
-
-    if (mode === 'login') {
-      const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
-      if (authError) {
-        setError(authError.message)
-      } else {
-        window.location.href = '/dashboard'
-      }
-    } else {
-      const { error: authError } = await supabase.auth.signUp({ email, password })
-      if (authError) {
-        setError(authError.message)
-      } else {
-        setSuccess('Account created! Check your email to confirm, then sign in.')
-        setMode('login')
-      }
-    }
-
-    setLoading(false)
+    localStorage.setItem('chantabbai_session', JSON.stringify({ username: user.username, isOwner: user.isOwner, userId: user.userId }))
+    router.replace('/dashboard')
   }
 
   return (
-    <div className="w-full max-w-md">
+    <div className="w-full max-w-sm">
+      {/* Brand header */}
+      <div className="flex flex-col items-center mb-6">
+        <Image src="/logo.png" alt="Chantabbai" width={72} height={72} className="rounded-2xl shadow-md mb-4" />
+        <h1 className="text-3xl font-extrabold text-gray-900" style={{ fontFamily: 'Poppins, sans-serif', letterSpacing: '-0.5px' }}>
+          <span style={{ color: '#C4161C' }}>Chantabbai</span>{' '}
+          <span className="text-gray-800">FileDrop</span>
+        </h1>
+        <p className="text-sm text-gray-400 mt-1 tracking-wide">Restaurant expense management</p>
+      </div>
+
       {/* Card */}
-      <div className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden">
-        {/* Header */}
-        <div className="bg-gradient-to-r from-red-600 to-red-700 px-8 py-8 text-center">
-          <div className="flex justify-center mb-4">
-            <div className="bg-white rounded-2xl p-3 shadow-lg">
-              <Logo size="md" />
-            </div>
-          </div>
-          <p className="text-red-100 text-sm mt-2">Secure cloud file storage</p>
-        </div>
+      <div className="bg-white rounded-2xl shadow-xl p-8 border border-gray-100">
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-5">Sign in to your account</p>
 
-        {/* Tabs */}
-        <div className="flex border-b border-gray-100">
-          <button
-            onClick={() => { setMode('login'); setError(''); setSuccess('') }}
-            className={`flex-1 py-3.5 text-sm font-semibold transition-colors ${
-              mode === 'login'
-                ? 'text-red-600 border-b-2 border-red-600 bg-red-50'
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
-            style={{ fontFamily: 'var(--font-poppins), Poppins, sans-serif' }}
-          >
-            Sign In
-          </button>
-          <button
-            onClick={() => { setMode('signup'); setError(''); setSuccess('') }}
-            className={`flex-1 py-3.5 text-sm font-semibold transition-colors ${
-              mode === 'signup'
-                ? 'text-red-600 border-b-2 border-red-600 bg-red-50'
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
-            style={{ fontFamily: 'var(--font-poppins), Poppins, sans-serif' }}
-          >
-            Sign Up
-          </button>
-        </div>
-
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="px-8 py-6 flex flex-col gap-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl">
+            <div className="bg-red-50 border border-red-200 text-red-600 rounded-xl px-4 py-3 text-sm font-medium">
               {error}
-            </div>
-          )}
-          {success && (
-            <div className="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl">
-              {success}
             </div>
           )}
 
           <div>
-            <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">
-              Email
-            </label>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Username</label>
             <input
-              type="email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              autoComplete="email"
-              className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100 transition-all"
+              type="text"
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+              required
+              autoComplete="off"
+              placeholder="Enter username"
+              className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-red-400 focus:border-transparent transition placeholder-gray-300"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">
-              Password
-            </label>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Password</label>
             <input
               type="password"
               value={password}
               onChange={e => setPassword(e.target.value)}
-              placeholder="••••••••"
-              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-              className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100 transition-all"
+              required
+              autoComplete="current-password"
+              placeholder="Enter password"
+              className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-red-400 focus:border-transparent transition placeholder-gray-300"
             />
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3.5 rounded-xl text-sm font-semibold text-white transition-all active:scale-95 disabled:opacity-60"
-            style={{
-              background: loading ? '#9ca3af' : 'linear-gradient(135deg, #C4161C, #9B1116)',
-              fontFamily: 'var(--font-poppins), Poppins, sans-serif',
-            }}
+            className="w-full py-3 rounded-xl font-bold text-white text-sm tracking-wide transition active:scale-95 disabled:opacity-50 mt-2 shadow-md"
+            style={{ background: 'linear-gradient(135deg, #C4161C 0%, #9B1116 100%)' }}
           >
-            {loading
-              ? mode === 'login' ? 'Signing in…' : 'Creating account…'
-              : mode === 'login' ? 'Sign In' : 'Create Account'
-            }
+            {loading ? 'Signing in…' : 'Sign In →'}
           </button>
         </form>
       </div>
+
+      <p className="text-center text-xs text-gray-300 mt-6">© 2026 Chantabbai Restaurant</p>
     </div>
   )
 }

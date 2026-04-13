@@ -24,6 +24,13 @@ html, body {
 ::-webkit-scrollbar-track { background: #f1f1f1; }
 ::-webkit-scrollbar-thumb { background: #C4161C; border-radius: 3px; }
 
+/* Hide scrollbar utility */
+.scrollbar-none { scrollbar-width: none; }
+.scrollbar-none::-webkit-scrollbar { display: none; }
+
+/* Mobile: prevent horizontal overflow */
+body { overflow-x: hidden; }
+
 /* Animations */
 @keyframes shimmer {
   0% { background-position: -400px 0; }

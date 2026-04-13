@@ -10,6 +10,11 @@ export interface ParsedDocument {
   tableData: string[][]
   rawLines: string[]
   summary_numbers: { label: string; value: string; unit: string }[]
+  // Structured bill fields for DB storage
+  restaurantCategory: string
+  vendorName: string
+  billAmountNumeric: number | null
+  billDateRaw: string
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -157,6 +162,112 @@ function extractAmount(lines: string[], full: string): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// RESTAURANT CATEGORY
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const RESTAURANT_CATEGORIES = [
+  'Staff Salary',
+  'Rent',
+  'Electricity',
+  'Water',
+  'Gas / LPG',
+  'Fuel & Transport',
+  'Meat & Seafood',
+  'Dairy & Eggs',
+  'Vegetables & Fruits',
+  'Rice & Grains',
+  'Cooking Supplies',
+  'Packaging',
+  'Equipment & Maintenance',
+  'Others',
+] as const
+
+export type RestaurantCategory = (typeof RESTAURANT_CATEGORIES)[number]
+
+export function detectRestaurantCategory(full: string, vendorName?: string): RestaurantCategory {
+  // Staff Salary: only if explicit salary keywords in the description/category, NOT just a person name as vendor
+  const nonVendorText = vendorName ? full.replace(new RegExp(vendorName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '') : full
+  if (/salary|payslip|wages|payroll|staff\s*pay|employee\s*pay/i.test(nonVendorText)) return 'Staff Salary'
+  if (/\brent\b|lease|property|premises/i.test(full))                                 return 'Rent'
+  if (/electricity|current\s*bill|eb\s*bill|bescom|mseb|tangedco|power\s*bill/i.test(full)) return 'Electricity'
+  if (/water\s*bill|water\s*supply|metro\s*water|bwssb/i.test(full))                 return 'Water'
+  if (/lpg|gas\s*cylinder|hp\s*gas|indane|bharatgas|cooking\s*gas/i.test(full))      return 'Gas / LPG'
+  if (/petrol|diesel|fuel|filling\s*station|hpcl|bpcl|iocl|ruchi\s*trails/i.test(full)) return 'Fuel & Transport'
+  // Payment voucher "Towards" field — e.g. "Towards: Petrol"
+  const towardsMatch = full.match(/towards\s*[:\-]?\s*([a-z\s\/&]+)/i)
+  if (towardsMatch) {
+    const towards = towardsMatch[1].toLowerCase()
+    if (/petrol|diesel|fuel/.test(towards))              return 'Fuel & Transport'
+    if (/gas|lpg/.test(towards))                         return 'Gas / LPG'
+    if (/salary|wages|staff/.test(towards))              return 'Staff Salary'
+    if (/rent/.test(towards))                            return 'Rent'
+    if (/electricity|current/.test(towards))             return 'Electricity'
+    if (/water/.test(towards))                           return 'Water'
+    if (/meat|chicken|mutton|fish/.test(towards))        return 'Meat & Seafood'
+    if (/milk|dairy|paneer|ghee/.test(towards))          return 'Dairy & Eggs'
+    if (/vegetable|onion|tomato/.test(towards))          return 'Vegetables & Fruits'
+    if (/rice|wheat|flour|grain/.test(towards))          return 'Rice & Grains'
+    if (/oil|spice|masala/.test(towards))                return 'Cooking Supplies'
+  }
+  if (/chicken|mutton|fish|prawn|seafood|meat|gosht|lamb|pork|beef/i.test(full))     return 'Meat & Seafood'
+  if (/milk|dairy|paneer|curd|cheese|butter|ghee|cream/i.test(full))                 return 'Dairy & Eggs'
+  if (/vegetable|sabji|sabzi|onion|tomato|potato|carrot|cabbage|cauliflower|spinach/i.test(full)) return 'Vegetables & Fruits'
+  if (/\brice\b|wheat|flour|\bdal\b|pulses|grain|maida|rava|suji/i.test(full))       return 'Rice & Grains'
+  if (/oil|spice|masala|ingredient|condiment|vinegar|sugar|salt/i.test(full))        return 'Cooking Supplies'
+  if (/packaging|container|box|packet|foil|wrapper/i.test(full))                     return 'Packaging'
+  if (/equipment|machine|appliance|repair|maintenance|service\s*charge/i.test(full)) return 'Equipment & Maintenance'
+  return 'Others'
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VENDOR
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function extractVendor(lines: string[]): string {
+  const SKIP = /^(invoice|receipt|bill|tax|gst|date|to:|from:|dear|sl\.?\s*no|s\.no|page|ref|no\.|original|duplicate)/i
+  for (const line of lines.slice(0, 12)) {
+    const t = line.trim()
+    if (t.length >= 3 && t.length <= 80 && !SKIP.test(t) && !/^\d/.test(t) && !/^[^a-zA-Z]{5,}$/.test(t)) {
+      return t
+    }
+  }
+  return 'Unknown Vendor'
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AMOUNT (numeric)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function extractAmountNumeric(lines: string[], full: string): number | null {
+  const AMOUNT_LABEL_NUM = /(?:grand\s*total|total\s*amount|net\s*(?:amount|payable)|amount\s*(?:paid|due)|bill\s*amount|net\s*pay|payable|subtotal|balance\s*due|total|amount)[\s:=₹Rs.\-]*([\d,]+(?:\.\d{1,2})?)/gi
+  const labelled: number[] = []
+  for (const line of lines) {
+    AMOUNT_LABEL_NUM.lastIndex = 0
+    for (const m of line.matchAll(AMOUNT_LABEL_NUM)) {
+      const v = parseFloat(m[1].replace(/,/g, ''))
+      if (!isNaN(v) && v > 0 && v < 10_000_000) labelled.push(v)
+    }
+  }
+  if (labelled.length) return Math.max(...labelled)
+
+  const currency: number[] = []
+  for (const m of full.matchAll(/(?:₹|rs\.?)\s*([\d,]+(?:\.\d{1,2})?)/gi)) {
+    const v = parseFloat(m[1].replace(/,/g, ''))
+    if (!isNaN(v) && v > 0 && v < 10_000_000) currency.push(v)
+  }
+  if (currency.length) return Math.max(...currency)
+
+  const decimals: number[] = []
+  for (const m of full.matchAll(/\b(\d{1,7}\.\d{2})\b/g)) {
+    const v = parseFloat(m[1])
+    if (!isNaN(v) && v >= 1 && v < 10_000_000) decimals.push(v)
+  }
+  if (decimals.length) return Math.max(...decimals)
+
+  return null
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // BILL TYPE
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -190,6 +301,9 @@ export function parseDocument(rawText: string, fileName: string): ParsedDocument
   const billType = detectBillType(full)
   const date     = extractDate(lines, rawText)
   const amount   = extractAmount(lines, full)
+  const category = detectRestaurantCategory(full)
+  const vendor   = extractVendor(lines)
+  const amountNum = extractAmountNumeric(lines, full)
 
   return {
     title:   fileName,
@@ -202,5 +316,9 @@ export function parseDocument(rawText: string, fileName: string): ParsedDocument
     tableData:       [],
     rawLines:        [],
     summary_numbers: [],
+    restaurantCategory: category,
+    vendorName:         vendor,
+    billAmountNumeric:  amountNum,
+    billDateRaw:        date,
   }
 }

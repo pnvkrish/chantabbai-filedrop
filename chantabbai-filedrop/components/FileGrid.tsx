@@ -20,9 +20,10 @@ interface FileGridProps {
   hasFilter: boolean
   onAction: (action: string, id: string) => Promise<void> | void
   getSignedUrl: (storagePath: string) => Promise<string | null>
+  isOwner?: boolean
 }
 
-export function FileGrid({ files, viewMode, hasFilter, onAction, getSignedUrl }: FileGridProps) {
+export function FileGrid({ files, viewMode, hasFilter, onAction, getSignedUrl, isOwner = false }: FileGridProps) {
   const containerRef = useRef<HTMLDivElement>(null)
 
   // Lazy-load PNG thumbnails
@@ -32,7 +33,7 @@ export function FileGrid({ files, viewMode, hasFilter, onAction, getSignedUrl }:
     const imgs = container.querySelectorAll<HTMLImageElement>('img[data-storage-path]')
     imgs.forEach(async img => {
       const path = img.dataset['storagePath']
-      if (!path || img.src) return
+      if (!path || img.getAttribute('src')) return  // use getAttribute, not .src (which returns base URL when unset)
       const url = await getSignedUrl(path)
       if (url) img.src = url
     })
@@ -54,9 +55,9 @@ export function FileGrid({ files, viewMode, hasFilter, onAction, getSignedUrl }:
 
   if (viewMode === ViewMode.Grid) {
     return (
-      <div ref={containerRef} className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
+      <div ref={containerRef} className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))' }}>
         {files.map(file => (
-          <FileCard key={file.id} file={file} onAction={onAction} />
+          <FileCard key={file.id} file={file} onAction={onAction} isOwner={isOwner} />
         ))}
       </div>
     )
@@ -65,13 +66,12 @@ export function FileGrid({ files, viewMode, hasFilter, onAction, getSignedUrl }:
   if (viewMode === ViewMode.List) {
     return (
       <div ref={containerRef} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-        {/* Header */}
-        <div className="grid text-xs font-semibold text-gray-400 px-4 py-2.5 border-b border-gray-100 bg-gray-50"
-          style={{ gridTemplateColumns: '32px 1fr 80px 110px 1fr' }}>
+        {/* Header — hide size/date cols on mobile */}
+        <div className="grid text-xs font-semibold text-gray-400 px-3 py-2.5 border-b border-gray-100 bg-gray-50"
+          style={{ gridTemplateColumns: '28px 1fr 70px 1fr' }}>
           <span />
           <span>Name</span>
-          <span>Size</span>
-          <span className="hidden sm:block">Uploaded</span>
+          <span className="hidden sm:block">Size</span>
           <span className="text-right">Actions</span>
         </div>
         {files.map(file => (
@@ -90,20 +90,20 @@ export function FileGrid({ files, viewMode, hasFilter, onAction, getSignedUrl }:
   })
 
   return (
-    <div ref={containerRef} className="flex flex-col gap-8">
+    <div ref={containerRef} className="flex flex-col gap-6">
       {Object.entries(grouped).map(([month, groupFiles]) => (
         <div key={month}>
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-3 h-3 rounded-full" style={{ background: '#C4161C' }} />
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-3 h-3 rounded-full shrink-0" style={{ background: '#C4161C' }} />
             <h3 className="text-sm font-semibold text-gray-600" style={{ fontFamily: 'var(--font-poppins), Poppins, sans-serif' }}>
               {month}
             </h3>
             <div className="flex-1 h-px bg-gray-100" />
-            <span className="text-xs text-gray-400">{groupFiles.length} files</span>
+            <span className="text-xs text-gray-400 shrink-0">{groupFiles.length} files</span>
           </div>
-          <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
+          <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))' }}>
             {groupFiles.map(file => (
-              <FileCard key={file.id} file={file} onAction={onAction} />
+              <FileCard key={file.id} file={file} onAction={onAction} isOwner={isOwner} />
             ))}
           </div>
         </div>
@@ -114,10 +114,10 @@ export function FileGrid({ files, viewMode, hasFilter, onAction, getSignedUrl }:
 
 // ─── File Card (Grid / Timeline) ─────────────────────────────────────────────
 
-function FileCard({ file, onAction }: { file: DbFileMetadata; onAction: (a: string, id: string) => void }) {
-  const isPng = file.mime_type === 'image/png'
+function FileCard({ file, onAction, isOwner = false }: { file: DbFileMetadata; onAction: (a: string, id: string) => void; isOwner?: boolean }) {
+  const isPng = file.mime_type === 'image/png' || file.mime_type === 'image/jpeg' || file.mime_type === 'image/webp'
   const [extracting, setExtracting] = useState(false)
-  const canExtract = EXTRACTABLE_MIME_TYPES.includes(file.mime_type)
+  const canExtract = isOwner && EXTRACTABLE_MIME_TYPES.includes(file.mime_type)
 
   const handleExtract = useCallback(async () => {
     setExtracting(true)
@@ -157,10 +157,24 @@ function FileCard({ file, onAction }: { file: DbFileMetadata; onAction: (a: stri
           {formatBytes(file.size)} · {formatDate(file.uploaded_at)}
         </p>
 
+        {/* Uploader */}
+        {file.uploaded_by && (
+          <p className="text-xs text-red-500 font-semibold mt-1">👤 {file.uploaded_by}</p>
+        )}
+
+        {/* Bill metadata */}
+        {(file.category || file.vendor_name || file.bill_amount) && (
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {file.category && <span className="tag-chip">{file.category}</span>}
+            {file.vendor_name && <span className="tag-chip text-blue-600 bg-blue-50">{file.vendor_name}</span>}
+            {file.bill_amount && <span className="tag-chip text-green-700 bg-green-50">₹{file.bill_amount.toLocaleString('en-IN')}</span>}
+          </div>
+        )}
+
         {/* Tags */}
         {file.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-1.5">
-            {file.tags.slice(0, 3).map(t => (
+          <div className="flex flex-wrap gap-1 mt-1">
+            {file.tags.slice(0, 2).map(t => (
               <span key={t} className="tag-chip">{t}</span>
             ))}
           </div>
@@ -169,7 +183,7 @@ function FileCard({ file, onAction }: { file: DbFileMetadata; onAction: (a: stri
 
       {/* Extract button */}
       {canExtract && (
-        <div className="px-3 pb-2">
+        <div className="px-3 pb-3">
           <button
             onClick={() => void handleExtract()}
             disabled={extracting}
@@ -177,10 +191,7 @@ function FileCard({ file, onAction }: { file: DbFileMetadata; onAction: (a: stri
             style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)' }}
           >
             {extracting ? (
-              <>
-                <span className="inline-block w-3 h-3 border-2 border-green-200 border-t-white rounded-full animate-spin" />
-                Extracting...
-              </>
+              <><span className="inline-block w-3 h-3 border-2 border-green-200 border-t-white rounded-full animate-spin" />Extracting…</>
             ) : (
               <>⬇ Extract to Excel</>
             )}
@@ -189,16 +200,20 @@ function FileCard({ file, onAction }: { file: DbFileMetadata; onAction: (a: stri
       )}
 
       {/* Actions */}
-      <div className="grid grid-cols-4 border-t border-gray-100">
+      <div className={`grid border-t border-gray-100 ${isOwner ? 'grid-cols-4' : 'grid-cols-2'}`}>
         <ActionBtn icon="👁" label="Preview" onClick={() => onAction('preview', file.id)} />
         <ActionBtn icon="⬇" label="Download" onClick={() => onAction('download', file.id)} />
-        <ActionBtn
-          icon={file.is_starred ? '★' : '☆'}
-          label={file.is_starred ? 'Starred' : 'Star'}
-          onClick={() => onAction('star', file.id)}
-          color={file.is_starred ? '#F5A623' : undefined}
-        />
-        <ActionBtn icon="🗑" label="Delete" onClick={() => onAction('delete', file.id)} danger />
+        {isOwner && (
+          <ActionBtn
+            icon={file.is_starred ? '★' : '☆'}
+            label={file.is_starred ? 'Starred' : 'Star'}
+            onClick={() => onAction('star', file.id)}
+            color={file.is_starred ? '#F5A623' : undefined}
+          />
+        )}
+        {isOwner && (
+          <ActionBtn icon="🗑" label="Delete" onClick={() => onAction('delete', file.id)} danger />
+        )}
       </div>
     </div>
   )
@@ -286,7 +301,7 @@ function ActionBtn({
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getFileEmoji(mimeType: string): string {
-  if (mimeType === 'image/png') return '🖼'
+  if (mimeType.startsWith('image/')) return '🖼'
   if (mimeType === 'application/pdf') return '📄'
   if (mimeType.includes('word')) return '📝'
   if (mimeType.includes('excel') || mimeType.includes('spreadsheet')) return '📊'

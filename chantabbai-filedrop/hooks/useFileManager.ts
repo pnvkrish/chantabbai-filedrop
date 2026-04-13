@@ -10,13 +10,13 @@ import {
   type SortConfig,
   type StorageStats,
   type ValidationResult,
+  FileCategory,
+  STORAGE_QUOTA_BYTES,
   getDefaultFilters,
   getDefaultSort,
   isFileMetadata,
 } from '@/lib/types'
 import {
-  fetchAllFiles,
-  getStorageStats,
   toggleStar,
   updateFileTags,
   incrementDownload,
@@ -25,10 +25,7 @@ import {
 } from '@/lib/database'
 import {
   validateFile,
-  uploadFile,
   deleteFromStorage,
-  getDownloadUrl,
-  createSignedUrl,
   UploadQueue,
 } from '@/lib/storage'
 import { applyFilters, applySortClient, savePreset, loadPresets, deletePreset } from '@/lib/search'
@@ -56,10 +53,10 @@ interface AppState {
   uploadItems: UploadItem[]
   stats: StorageStats | null
   allTags: string[]
-  currentView: 'upload' | 'files'
+  currentView: 'upload' | 'files' | 'analytics'
 }
 
-export function useFileManager(userId: string) {
+export function useFileManager(userId: string, isOwner = false, username = 'pavan') {
   const [state, setState] = useState<AppState>({
     files: [],
     filteredFiles: [],
@@ -70,7 +67,7 @@ export function useFileManager(userId: string) {
     uploadItems: [],
     stats: null,
     allTags: [],
-    currentView: 'upload',
+    currentView: isOwner ? 'upload' : 'files',
   })
 
   const uploadQueueRef = useRef(new UploadQueue())
@@ -87,22 +84,43 @@ export function useFileManager(userId: string) {
 
   const loadFiles = useCallback(async () => {
     updateState({ isLoading: true })
-    const result = await fetchAllFiles(userId)
-    if (result.ok) {
+    try {
+      const res = await fetch('/api/files')
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const json = await res.json() as { files: DbFileMetadata[] }
+      const files = json.files ?? []
+      // Compute stats from loaded files (avoids RLS-restricted query)
+      const totalBytes = files.reduce((acc, f) => acc + f.size, 0)
+      const stats: StorageStats = {
+        totalFiles: files.length,
+        totalBytes,
+        usedPercent: Math.min((totalBytes / STORAGE_QUOTA_BYTES) * 100, 100),
+        byCategory: {
+          [FileCategory.All]: files.length,
+          [FileCategory.Image]: files.filter(f => f.mime_type.startsWith('image/')).length,
+          [FileCategory.Document]: files.filter(f =>
+            f.mime_type === 'application/pdf' ||
+            f.mime_type === 'application/msword' ||
+            f.mime_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          ).length,
+          [FileCategory.Spreadsheet]: files.filter(f =>
+            f.mime_type === 'application/vnd.ms-excel' ||
+            f.mime_type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          ).length,
+        },
+      }
       setState(prev => {
-        const filtered = applySortClient(applyFilters(result.value, prev.filters), prev.sort)
-        return { ...prev, files: result.value, filteredFiles: filtered, isLoading: false }
+        const filtered = applySortClient(applyFilters(files, prev.filters), prev.sort)
+        return { ...prev, files, filteredFiles: filtered, isLoading: false, stats }
       })
-    } else {
-      showToast(`Failed to load files: ${result.error}`, NotificationType.Error)
+    } catch (e) {
+      showToast(`Failed to load files: ${String(e)}`, NotificationType.Error)
       updateState({ isLoading: false })
     }
   }, [userId, updateState])
 
-  const loadStats = useCallback(async () => {
-    const result = await getStorageStats(userId)
-    if (result.ok) updateState({ stats: result.value })
-  }, [userId, updateState])
+  // Stats are now computed inside loadFiles — this is a no-op alias kept for call-site compatibility
+  const loadStats = useCallback(async () => { /* stats computed in loadFiles */ }, [])
 
   const loadAllTags = useCallback(async () => {
     const result = await getAllTags(userId)
@@ -159,7 +177,7 @@ export function useFileManager(userId: string) {
 
   // ── Navigation ───────────────────────────────────────────────────────────────
 
-  const switchView = useCallback((view: 'upload' | 'files') => {
+  const switchView = useCallback((view: 'upload' | 'files' | 'analytics') => {
     updateState({ currentView: view })
   }, [updateState])
 
@@ -205,27 +223,39 @@ export function useFileManager(userId: string) {
 
   // ── File actions ─────────────────────────────────────────────────────────────
 
+  // Central signed URL helper — uses service role key via API route, bypasses storage RLS
+  const fetchSignedUrl = useCallback(async (storagePath: string): Promise<string | null> => {
+    try {
+      const res = await fetch(`/api/signed-url?path=${encodeURIComponent(storagePath)}`)
+      if (!res.ok) return null
+      const json = await res.json() as { url?: string }
+      return json.url ?? null
+    } catch {
+      return null
+    }
+  }, [])
+
   const handlePreview = useCallback(async (id: string): Promise<{ file: DbFileMetadata; url: string } | null> => {
     const file = state.filteredFiles.find(f => f.id === id) ?? state.files.find(f => f.id === id)
     if (!file) return null
-    const urlResult = await createSignedUrl(file.storage_path, file.id, 3600)
-    if (!urlResult.ok) {
-      showToast(`Failed to get preview URL: ${urlResult.error}`, NotificationType.Error)
+    const url = await fetchSignedUrl(file.storage_path)
+    if (!url) {
+      showToast('Failed to get preview URL', NotificationType.Error)
       return null
     }
-    return { file, url: urlResult.value.url }
-  }, [state.filteredFiles, state.files])
+    return { file, url }
+  }, [state.filteredFiles, state.files, fetchSignedUrl])
 
   const handleDownload = useCallback(async (id: string) => {
     const file = state.files.find(f => f.id === id)
     if (!file) return
-    const urlResult = await getDownloadUrl(file.storage_path)
-    if (!urlResult.ok) {
-      showToast(`Download failed: ${urlResult.error}`, NotificationType.Error)
+    const url = await fetchSignedUrl(file.storage_path)
+    if (!url) {
+      showToast('Download failed', NotificationType.Error)
       return
     }
     const a = document.createElement('a')
-    a.href = urlResult.value
+    a.href = url
     a.download = file.original_name
     a.click()
     void incrementDownload(id).then(() => {
@@ -234,18 +264,18 @@ export function useFileManager(userId: string) {
         return { ...prev, files, filteredFiles: applySortClient(applyFilters(files, prev.filters), prev.sort) }
       })
     })
-  }, [state.files])
+  }, [state.files, fetchSignedUrl])
 
-  const handleShare = useCallback(async (id: string, expiresInSeconds: number): Promise<string | null> => {
+  const handleShare = useCallback(async (id: string, _expiresInSeconds: number): Promise<string | null> => {
     const file = state.files.find(f => f.id === id)
     if (!file) return null
-    const result = await createSignedUrl(file.storage_path, id, expiresInSeconds)
-    if (!result.ok) {
-      showToast(`Share failed: ${result.error}`, NotificationType.Error)
+    const url = await fetchSignedUrl(file.storage_path)
+    if (!url) {
+      showToast('Share failed', NotificationType.Error)
       return null
     }
-    return result.value.url
-  }, [state.files])
+    return url
+  }, [state.files, fetchSignedUrl])
 
   const handleStar = useCallback(async (id: string, starred: boolean) => {
     const result = await toggleStar(id, starred)
@@ -332,17 +362,38 @@ export function useFileManager(userId: string) {
       uploadQueueRef.current.enqueue(async () => {
         setState(p => ({
           ...p,
-          uploadItems: p.uploadItems.map(i => i.id === item.id ? { ...i, status: 'uploading' } : i),
+          uploadItems: p.uploadItems.map(i => i.id === item.id ? { ...i, status: 'uploading', progress: 5 } : i),
         }))
 
         showToast(`Uploading ${item.file.name}…`, NotificationType.Info, 2000)
 
-        const result = await uploadFile(item.file, userId, (pct) => {
-          setState(p => ({
-            ...p,
-            uploadItems: p.uploadItems.map(i => i.id === item.id ? { ...i, progress: pct } : i),
-          }))
-        })
+        // Compute checksum client-side for duplicate detection
+        let checksum = ''
+        try {
+          const buffer = await item.file.arrayBuffer()
+          const hashBuffer = await window.crypto.subtle.digest('SHA-256', buffer)
+          checksum = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('')
+        } catch { /* skip checksum if unavailable */ }
+
+        setState(p => ({ ...p, uploadItems: p.uploadItems.map(i => i.id === item.id ? { ...i, progress: 20 } : i) }))
+
+        // Upload via server API (service role — bypasses RLS)
+        const formData = new FormData()
+        formData.append('file', item.file)
+        formData.append('username', username)
+        if (checksum) formData.append('checksum', checksum)
+
+        let result: { isDuplicate: boolean; metadata: DbFileMetadata | null; error?: string }
+        try {
+          const res = await fetch('/api/upload', { method: 'POST', body: formData })
+          setState(p => ({ ...p, uploadItems: p.uploadItems.map(i => i.id === item.id ? { ...i, progress: 90 } : i) }))
+          result = await res.json() as typeof result
+          if (!res.ok && !result.isDuplicate) {
+            result = { isDuplicate: false, metadata: null, error: result.error ?? `HTTP ${res.status}` }
+          }
+        } catch (e) {
+          result = { isDuplicate: false, metadata: null, error: String(e) }
+        }
 
         if (result.isDuplicate) {
           setState(p => ({
@@ -353,7 +404,7 @@ export function useFileManager(userId: string) {
         } else if (result.error) {
           setState(p => ({
             ...p,
-            uploadItems: p.uploadItems.map(i => i.id === item.id ? { ...i, status: 'error', error: result.error } : i),
+            uploadItems: p.uploadItems.map(i => i.id === item.id ? { ...i, status: 'error', error: result.error ?? null, progress: 100 } : i),
           }))
           showToast(`Failed: ${item.file.name} — ${result.error}`, NotificationType.Error)
         } else {
@@ -393,30 +444,29 @@ export function useFileManager(userId: string) {
   }, [])
 
   const getSignedUrlForThumbnail = useCallback(async (storagePath: string): Promise<string | null> => {
-    const result = await createSignedUrl(storagePath, '', 3600)
-    return result.ok ? result.value.url : null
-  }, [])
+    return fetchSignedUrl(storagePath)
+  }, [fetchSignedUrl])
 
   const handleExtractToExcel = useCallback(async (item: UploadItem): Promise<void> => {
     if (!item.storagePath) {
       showToast('No storage path available for extraction', NotificationType.Error)
       return
     }
-    const urlResult = await createSignedUrl(item.storagePath, '', 3600)
-    if (!urlResult.ok) {
-      showToast(`Failed to get file URL: ${urlResult.error}`, NotificationType.Error)
+    const url = await fetchSignedUrl(item.storagePath)
+    if (!url) {
+      showToast('Failed to get file URL', NotificationType.Error)
       return
     }
     const { extractAndDownloadExcel } = await import('@/lib/extractToExcel')
     showToast(`Extracting data from "${item.file.name}"…`, NotificationType.Info, 3000)
     try {
-      await extractAndDownloadExcel(urlResult.value.url, item.file.type, item.file.name)
+      await extractAndDownloadExcel(url, item.file.type, item.file.name, item.dbFileId, new Date().toISOString())
       showToast(`Excel file downloaded for "${item.file.name}"`, NotificationType.Success)
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Extraction failed'
       showToast(`Extraction failed: ${msg}`, NotificationType.Error)
     }
-  }, [])
+  }, [fetchSignedUrl])
 
   const handleCleanOrphans = useCallback(async () => {
     const files = state.files
@@ -425,11 +475,11 @@ export function useFileManager(userId: string) {
 
     const orphanIds: string[] = []
     for (const file of files) {
-      const result = await createSignedUrl(file.storage_path, '', 60)
-      if (!result.ok) { orphanIds.push(file.id); continue }
+      const url = await fetchSignedUrl(file.storage_path)
+      if (!url) { orphanIds.push(file.id); continue }
       // Try to fetch the file — if 4xx it's gone from storage
       try {
-        const res = await fetch(result.value.url, { method: 'HEAD' })
+        const res = await fetch(url, { method: 'HEAD' })
         if (!res.ok) orphanIds.push(file.id)
       } catch {
         orphanIds.push(file.id)
@@ -456,24 +506,36 @@ export function useFileManager(userId: string) {
     })
     showToast(`Removed ${deleted} orphaned record(s)`, NotificationType.Success)
     void loadStats()
-  }, [state.files, loadStats])
+  }, [state.files, loadStats, fetchSignedUrl])
+
+  const handleApprovalChange = useCallback(async (fileId: string, status: 'approved' | 'rejected' | 'pending'): Promise<void> => {
+    const { updateApprovalStatus } = await import('@/lib/database')
+    const result = await updateApprovalStatus(fileId, status)
+    if (!result.ok) { showToast(`Failed to update status: ${result.error}`, NotificationType.Error); return }
+    setState(prev => ({
+      ...prev,
+      files: prev.files.map(f => f.id === fileId ? { ...f, approval_status: status } : f),
+      filteredFiles: prev.filteredFiles.map(f => f.id === fileId ? { ...f, approval_status: status } : f),
+    }))
+    showToast(`Bill ${status}`, status === 'approved' ? NotificationType.Success : status === 'rejected' ? NotificationType.Error : NotificationType.Info)
+  }, [])
 
   const handleExtractFromGrid = useCallback(async (file: import('@/lib/supabase/client').DbFileMetadata): Promise<void> => {
-    const urlResult = await createSignedUrl(file.storage_path, '', 3600)
-    if (!urlResult.ok) {
-      showToast(`Failed to get file URL: ${urlResult.error}`, NotificationType.Error)
+    const url = await fetchSignedUrl(file.storage_path)
+    if (!url) {
+      showToast('Failed to get file URL', NotificationType.Error)
       return
     }
     const { extractAndDownloadExcel } = await import('@/lib/extractToExcel')
     showToast(`Extracting data from "${file.original_name}"…`, NotificationType.Info, 3000)
     try {
-      await extractAndDownloadExcel(urlResult.value.url, file.mime_type, file.original_name)
+      await extractAndDownloadExcel(url, file.mime_type, file.original_name, file.id, file.uploaded_at)
       showToast(`Excel file downloaded for "${file.original_name}"`, NotificationType.Success)
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Extraction failed'
       showToast(`Extraction failed: ${msg}`, NotificationType.Error)
     }
-  }, [])
+  }, [fetchSignedUrl])
 
   const handleExtractAll = useCallback(async (files: import('@/lib/supabase/client').DbFileMetadata[]): Promise<void> => {
     const EXTRACTABLE = [
@@ -493,11 +555,11 @@ export function useFileManager(userId: string) {
 
     showToast(`Extracting ${extractable.length} files…`, NotificationType.Info, 8000)
 
-    const fileInputs: { fileUrl: string; mimeType: string; fileName: string }[] = []
+    const fileInputs: { fileUrl: string; mimeType: string; fileName: string; uploadedAt: string }[] = []
     for (const file of extractable) {
-      const urlResult = await createSignedUrl(file.storage_path, '', 3600)
-      if (urlResult.ok) {
-        fileInputs.push({ fileUrl: urlResult.value.url, mimeType: file.mime_type, fileName: file.original_name })
+      const url = await fetchSignedUrl(file.storage_path)
+      if (url) {
+        fileInputs.push({ fileUrl: url, mimeType: file.mime_type, fileName: file.original_name, uploadedAt: file.uploaded_at })
       }
     }
 
@@ -509,7 +571,7 @@ export function useFileManager(userId: string) {
       const msg = err instanceof Error ? err.message : 'Extraction failed'
       showToast(`Extract All failed: ${msg}`, NotificationType.Error)
     }
-  }, [])
+  }, [fetchSignedUrl])
 
 
   return {
@@ -534,6 +596,7 @@ export function useFileManager(userId: string) {
       getSignedUrlForThumbnail,
       handleExtractToExcel,
       handleExtractFromGrid,
+      handleApprovalChange,
       handleExtractAll,
       handleCleanOrphans,
       loadPresets,

@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useCallback, useRef } from 'react'
-import { useRouter } from 'next/navigation'
 import { Logo } from './Logo'
 import { UploadZone } from './UploadZone'
 import { FileGrid } from './FileGrid'
@@ -11,18 +10,19 @@ import { PreviewModal } from './PreviewModal'
 import { PasswordModal } from './PasswordModal'
 import { ToastContainer } from './Toast'
 import { useFileManager } from '@/hooks/useFileManager'
+import { AnalyticsDashboard } from './AnalyticsDashboard'
 import { ViewMode } from '@/lib/types'
 import type { DbFileMetadata } from '@/lib/supabase/client'
-import { supabase } from '@/lib/supabase/client'
 
 interface DashboardProps {
   userId: string
   userEmail: string
+  isOwner: boolean
 }
 
-export function Dashboard({ userId, userEmail }: DashboardProps) {
-  const router = useRouter()
-  const { state, actions } = useFileManager(userId)
+export function Dashboard({ userId, userEmail, isOwner }: DashboardProps) {
+
+  const { state, actions } = useFileManager(userId, isOwner, userEmail)
   const [previewData, setPreviewData] = useState<{ file: DbFileMetadata; url: string } | null>(null)
   const [extractingAll, setExtractingAll] = useState(false)
   const extractAllRef = useRef(false)
@@ -32,8 +32,8 @@ export function Dashboard({ userId, userEmail }: DashboardProps) {
     setPasswordModal({ title, description, onConfirm })
   }, [])
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
+  const handleLogout = () => {
+    localStorage.removeItem('chantabbai_session')
     window.location.href = '/'
   }
 
@@ -74,6 +74,13 @@ export function Dashboard({ userId, userEmail }: DashboardProps) {
         await actions.handleExtractFromGrid(file)
         break
       }
+      case 'approve':
+      case 'reject':
+      case 'reset-pending': {
+        const status = action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : 'pending'
+        await actions.handleApprovalChange(id, status as 'approved' | 'rejected' | 'pending')
+        break
+      }
     }
   }, [actions, state.files])
 
@@ -91,32 +98,28 @@ export function Dashboard({ userId, userEmail }: DashboardProps) {
 
       {/* Header */}
       <header className="sticky top-0 z-40 bg-white border-b border-gray-100 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-4">
-          <Logo />
 
-          {/* Nav */}
+        {/* ── Desktop header (sm+): logo | nav | user ── */}
+        <div className="hidden sm:flex max-w-7xl mx-auto px-4 py-3 items-center gap-4">
+          <Logo />
           <nav className="flex gap-1 ml-6">
-            <NavBtn
-              active={state.currentView === 'upload'}
-              onClick={() => actions.switchView('upload')}
-            >
-              📎 Upload
-            </NavBtn>
-            <NavBtn
-              active={state.currentView === 'files'}
-              onClick={() => actions.switchView('files')}
-            >
-              📁 My Files {state.files.length > 0 && (
-                <span className="ml-1 text-xs px-1.5 py-0.5 rounded-full bg-current/10">
-                  {state.files.length}
-                </span>
+            {isOwner && (
+              <NavBtn active={state.currentView === 'upload'} onClick={() => actions.switchView('upload')}>
+                📎 Upload
+              </NavBtn>
+            )}
+            <NavBtn active={state.currentView === 'files'} onClick={() => actions.switchView('files')}>
+              📁 Files
+              {state.files.length > 0 && (
+                <span className="ml-1 text-xs px-1.5 py-0.5 rounded-full bg-current/10">{state.files.length}</span>
               )}
             </NavBtn>
+            <NavBtn active={state.currentView === 'analytics'} onClick={() => actions.switchView('analytics')}>
+              📊 Analytics
+            </NavBtn>
           </nav>
-
-          {/* User */}
           <div className="ml-auto flex items-center gap-3">
-            <span className="text-xs text-gray-400 hidden sm:block truncate max-w-32">{userEmail}</span>
+            <span className="text-xs font-semibold text-gray-600 truncate max-w-32">👤 {userEmail}</span>
             <button
               onClick={handleLogout}
               className="text-xs px-3 py-2 rounded-xl border border-gray-200 text-gray-500 hover:border-red-300 hover:text-red-600 transition-all"
@@ -126,21 +129,59 @@ export function Dashboard({ userId, userEmail }: DashboardProps) {
             </button>
           </div>
         </div>
+
+        {/* ── Mobile header: logo+signout row | centered pill nav row ── */}
+        <div className="sm:hidden">
+          {/* Row 1: logo + username + sign out */}
+          <div className="flex items-center justify-between px-4 pt-2.5 pb-1">
+            <Logo />
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-gray-500">👤 {userEmail}</span>
+              <button
+                onClick={handleLogout}
+                className="text-xs px-3 py-1.5 rounded-xl border border-gray-200 text-gray-500 hover:border-red-300 hover:text-red-600 transition-all"
+                style={{ fontFamily: 'var(--font-poppins), Poppins, sans-serif' }}
+              >
+                Sign Out
+              </button>
+            </div>
+          </div>
+          {/* Row 2: centered pill nav */}
+          <div className="flex justify-center px-4 pb-2">
+            <nav className="flex items-center gap-1 bg-gray-100 rounded-2xl p-1">
+              {isOwner && (
+                <NavBtn active={state.currentView === 'upload'} onClick={() => actions.switchView('upload')}>
+                  📎 Upload
+                </NavBtn>
+              )}
+              <NavBtn active={state.currentView === 'files'} onClick={() => actions.switchView('files')}>
+                📁 Files
+                {state.files.length > 0 && (
+                  <span className="ml-1 text-xs px-1.5 py-0.5 rounded-full bg-current/10">{state.files.length}</span>
+                )}
+              </NavBtn>
+              <NavBtn active={state.currentView === 'analytics'} onClick={() => actions.switchView('analytics')}>
+                📊 Analytics
+              </NavBtn>
+            </nav>
+          </div>
+        </div>
+
       </header>
 
       {/* Main */}
-      <main className="max-w-7xl mx-auto px-4 py-8">
-        {/* Upload view */}
-        {state.currentView === 'upload' && (
+      <main className="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
+        {/* Upload view — owner only */}
+        {state.currentView === 'upload' && isOwner && (
           <div className="animate-fade-in">
-            <div className="text-center mb-8">
+            <div className="text-center mb-5 sm:mb-8">
               <h1
-                className="text-2xl font-bold text-gray-800 mb-2"
+                className="text-xl sm:text-2xl font-bold text-gray-800 mb-1.5"
                 style={{ fontFamily: 'var(--font-poppins), Poppins, sans-serif' }}
               >
                 Upload Files
               </h1>
-              <p className="text-gray-400 text-sm">PNG, JPG, HEIC, PDF, Word & Excel — up to 30 MB each</p>
+              <p className="text-gray-400 text-xs sm:text-sm">PNG, JPG, HEIC, PDF, Word & Excel — up to 30 MB each</p>
             </div>
             <UploadZone
               uploadItems={state.uploadItems}
@@ -152,59 +193,68 @@ export function Dashboard({ userId, userEmail }: DashboardProps) {
           </div>
         )}
 
+        {/* Analytics view */}
+        {state.currentView === 'analytics' && (
+          <div className="animate-fade-in">
+            <AnalyticsDashboard userId={userId} isOwner={isOwner} />
+          </div>
+        )}
+
         {/* Files view */}
         {state.currentView === 'files' && (
-          <div className="animate-fade-in flex flex-col gap-6">
+          <div className="animate-fade-in flex flex-col gap-4">
             {/* Stats */}
             {state.stats && <StatsBar stats={state.stats} />}
 
             {/* Filter bar + Extract All */}
-            <div className="flex items-start gap-3">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-2">
               <div className="flex-1">
-            <FilterBar
-              filters={state.filters}
-              sort={state.sort}
-              allTags={state.allTags}
-              totalFiles={state.files.length}
-              filteredCount={state.filteredFiles.length}
-              presets={actions.loadPresets()}
-              onFiltersChange={actions.setFilters}
-              onSortChange={actions.setSort}
-              onSavePreset={actions.handleSavePreset}
-              onLoadPreset={actions.handleLoadPreset}
-              onDeletePreset={actions.handleDeletePreset}
-            />
+                <FilterBar
+                  filters={state.filters}
+                  sort={state.sort}
+                  allTags={state.allTags}
+                  totalFiles={state.files.length}
+                  filteredCount={state.filteredFiles.length}
+                  presets={actions.loadPresets()}
+                  onFiltersChange={actions.setFilters}
+                  onSortChange={actions.setSort}
+                  onSavePreset={actions.handleSavePreset}
+                  onLoadPreset={actions.handleLoadPreset}
+                  onDeletePreset={actions.handleDeletePreset}
+                />
               </div>
 
-              {/* Extract All button */}
-              <button
-                onClick={async () => {
-                  if (extractAllRef.current) return
-                  extractAllRef.current = true
-                  setExtractingAll(true)
-                  try {
-                    await actions.handleExtractAll(state.filteredFiles)
-                  } finally {
-                    extractAllRef.current = false
-                    setExtractingAll(false)
-                  }
-                }}
-                disabled={extractingAll || state.filteredFiles.length === 0}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 whitespace-nowrap shrink-0"
-                style={{
-                  background: extractingAll ? '#15803d' : 'linear-gradient(135deg, #16a34a, #15803d)',
-                  fontFamily: 'var(--font-poppins), Poppins, sans-serif',
-                }}
-              >
-                {extractingAll ? (
-                  <>
-                    <span className="inline-block w-4 h-4 border-2 border-green-200 border-t-white rounded-full animate-spin" />
-                    Extracting...
-                  </>
-                ) : (
-                  <>⬇ Extract All</>
-                )}
-              </button>
+              {/* Extract All button — owner only */}
+              {isOwner && (
+                <button
+                  onClick={async () => {
+                    if (extractAllRef.current) return
+                    extractAllRef.current = true
+                    setExtractingAll(true)
+                    try {
+                      await actions.handleExtractAll(state.filteredFiles)
+                    } finally {
+                      extractAllRef.current = false
+                      setExtractingAll(false)
+                    }
+                  }}
+                  disabled={extractingAll || state.filteredFiles.length === 0}
+                  className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 whitespace-nowrap shrink-0"
+                  style={{
+                    background: extractingAll ? '#15803d' : 'linear-gradient(135deg, #16a34a, #15803d)',
+                    fontFamily: 'var(--font-poppins), Poppins, sans-serif',
+                  }}
+                >
+                  {extractingAll ? (
+                    <>
+                      <span className="inline-block w-4 h-4 border-2 border-green-200 border-t-white rounded-full animate-spin" />
+                      Extracting...
+                    </>
+                  ) : (
+                    <>⬇ Extract All</>
+                  )}
+                </button>
+              )}
             </div>
 
             {/* View mode switcher */}
@@ -227,14 +277,14 @@ export function Dashboard({ userId, userEmail }: DashboardProps) {
                   </button>
                 ))}
               </div>
-              <span className="text-xs text-gray-400">{state.viewMode} view</span>
+              <span className="text-xs text-gray-400 hidden sm:block">{state.viewMode} view</span>
             </div>
 
             {/* File list */}
             {state.isLoading ? (
-              <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
+              <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}>
                 {Array.from({ length: 6 }).map((_, i) => (
-                  <div key={i} className="skeleton h-48 rounded-2xl" />
+                  <div key={i} className="skeleton h-44 rounded-2xl" />
                 ))}
               </div>
             ) : (
@@ -244,6 +294,7 @@ export function Dashboard({ userId, userEmail }: DashboardProps) {
                 hasFilter={hasFilter}
                 onAction={handleFileAction}
                 getSignedUrl={actions.getSignedUrlForThumbnail}
+                isOwner={isOwner}
               />
             )}
           </div>
@@ -294,8 +345,8 @@ function NavBtn({ active, onClick, children }: { active: boolean; onClick: () =>
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
-        active ? 'nav-active shadow-sm' : 'text-gray-500 hover:bg-gray-100'
+      className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold transition-all whitespace-nowrap ${
+        active ? 'nav-active shadow-sm' : 'text-gray-500 hover:bg-white/60'
       }`}
       style={{ fontFamily: 'var(--font-poppins), Poppins, sans-serif' }}
     >

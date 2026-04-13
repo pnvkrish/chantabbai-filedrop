@@ -22,6 +22,11 @@ export interface Database {
           download_count: number
           uploaded_at: string
           updated_at: string
+          category: string | null
+          vendor_name: string | null
+          bill_amount: number | null
+          bill_date: string | null
+          approval_status: 'pending' | 'approved' | 'rejected' | null
         }
         Insert: {
           id?: string
@@ -38,6 +43,11 @@ export interface Database {
           download_count?: number
           uploaded_at?: string
           updated_at?: string
+          category?: string | null
+          vendor_name?: string | null
+          bill_amount?: number | null
+          bill_date?: string | null
+          approval_status?: 'pending' | 'approved' | 'rejected' | null
         }
         Update: {
           id?: string
@@ -54,6 +64,69 @@ export interface Database {
           download_count?: number
           uploaded_at?: string
           updated_at?: string
+          category?: string | null
+          vendor_name?: string | null
+          bill_amount?: number | null
+          bill_date?: string | null
+          approval_status?: 'pending' | 'approved' | 'rejected' | null
+        }
+        Relationships: []
+      }
+      budget_settings: {
+        Row: {
+          id: string
+          user_id: string
+          category: string
+          monthly_limit: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          category: string
+          monthly_limit: number
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          monthly_limit?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      manual_bills: {
+        Row: {
+          id: string
+          user_id: string
+          vendor_name: string | null
+          category: string | null
+          bill_amount: number | null
+          bill_date: string | null
+          description: string | null
+          approval_status: string | null
+          source: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          vendor_name?: string | null
+          category?: string | null
+          bill_amount?: number | null
+          bill_date?: string | null
+          description?: string | null
+          approval_status?: string | null
+          source?: string | null
+          created_at?: string
+        }
+        Update: {
+          vendor_name?: string | null
+          category?: string | null
+          bill_amount?: number | null
+          bill_date?: string | null
+          description?: string | null
+          approval_status?: string | null
         }
         Relationships: []
       }
@@ -65,12 +138,18 @@ export interface Database {
       }
     }
     Views: Record<string, never>
+    Enums: Record<string, never>
+    CompositeTypes: Record<string, never>
   }
 }
 
-export type DbFileMetadata = Database['public']['Tables']['file_metadata']['Row']
+export type DbFileMetadata = Database['public']['Tables']['file_metadata']['Row'] & {
+  uploaded_by?: string | null
+}
 export type DbFileInsert = Database['public']['Tables']['file_metadata']['Insert']
 export type DbFileUpdate = Database['public']['Tables']['file_metadata']['Update']
+export type BudgetSetting = Database['public']['Tables']['budget_settings']['Row']
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected'
 
 // ─── Client singleton ─────────────────────────────────────────────────────────
 

@@ -43,7 +43,7 @@ interface ToastItemProps {
 
 function ToastItem({ toast, onRemove }: ToastItemProps) {
   useEffect(() => {
-    const timer = setTimeout(() => onRemove(toast.id), 4000)
+    const timer = setTimeout(() => onRemove(toast.id), 3000)
     return () => clearTimeout(timer)
   }, [toast.id, onRemove])
 

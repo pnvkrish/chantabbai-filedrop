@@ -51,6 +51,11 @@ export interface FileMetadata {
   download_count: number
   uploaded_at: string
   updated_at: string
+  category: string | null
+  vendor_name: string | null
+  bill_amount: number | null
+  bill_date: string | null
+  approval_status: 'pending' | 'approved' | 'rejected' | null
 }
 
 export interface SearchFilters {
@@ -146,7 +151,9 @@ export function isFileMetadata(v: unknown): v is FileMetadata {
     typeof obj['user_id'] === 'string' &&
     typeof obj['name'] === 'string' &&
     typeof obj['storage_path'] === 'string' &&
-    typeof obj['checksum'] === 'string'
+    typeof obj['checksum'] === 'string' &&
+    // New bill fields are optional (may be null from older records)
+    ('category' in obj || true)
   )
 }
 

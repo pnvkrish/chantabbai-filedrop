@@ -21,7 +21,7 @@ interface PreviewModalProps {
 type PreviewType = 'image' | 'pdf' | 'office'
 
 function getPreviewType(mimeType: string): PreviewType {
-  if (mimeType === 'image/png') return 'image'
+  if (mimeType.startsWith('image/')) return 'image'
   if (mimeType === 'application/pdf') return 'pdf'
   return 'office'
 }
@@ -351,7 +351,7 @@ function MetaRow({ label, value }: { label: string; value: string }) {
 }
 
 function getFileEmoji(mimeType: string): string {
-  if (mimeType === 'image/png') return '🖼'
+  if (mimeType.startsWith('image/')) return '🖼'
   if (mimeType === 'application/pdf') return '📄'
   if (mimeType.includes('word')) return '📝'
   if (mimeType.includes('excel') || mimeType.includes('spreadsheet')) return '📊'
