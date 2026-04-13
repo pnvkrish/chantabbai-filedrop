@@ -19,6 +19,11 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: 'Chantabbai FileDrop',
   description: 'Secure file storage by Chantabbai — upload, manage and share your files.',
+  icons: {
+    icon: '/logo.png',
+    shortcut: '/logo.png',
+    apple: '/logo.png',
+  },
 }
 
 export const viewport = {
