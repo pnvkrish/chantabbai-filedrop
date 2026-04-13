@@ -51,16 +51,9 @@ export function AnalyticsDashboard({ userId, isOwner = false }: Props) {
       fetch('/api/bills').then(r => r.json()) as Promise<{ bills: BillAnalyticsRow[] }>,
       fetchBudgets(userId),
     ])
-    setBills((billsRes.bills ?? []).map((r: Record<string, unknown>) => ({
-      id: r.id as string,
-      original_name: (r.description as string) || (r.vendor_name as string) || 'Excel Entry',
-      category: (() => { const n = normalizeExcelCategory((r.category as string) ?? ''); return (n && n !== 'SKIP') ? n : (r.category as string | null) })(),
-      vendor_name: r.vendor_name as string | null,
-      bill_amount: r.bill_amount as number | null,
-      bill_date: r.bill_date as string | null,
-      approval_status: null,
-      uploaded_at: r.created_at as string,
-      source: 'excel_import',
+    setBills((billsRes.bills ?? []).map((r) => ({
+      ...r,
+      category: (() => { const n = normalizeExcelCategory(r.category ?? ''); return (n && n !== 'SKIP') ? n : r.category })(),
     })))
     if (budgetRes.ok) setBudgets(budgetRes.value)
     setLoading(false)

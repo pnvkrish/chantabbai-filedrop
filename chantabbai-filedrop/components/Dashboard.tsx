@@ -337,6 +337,18 @@ export function Dashboard({ userId, userEmail, isOwner }: DashboardProps) {
           onCancel={() => setPasswordModal(null)}
         />
       )}
+
+      {/* Footer */}
+      <footer className="mt-auto border-t border-gray-100 bg-white py-3 px-4">
+        <p
+          className="text-center text-xs text-gray-400"
+          style={{ fontFamily: 'var(--font-poppins), Poppins, sans-serif' }}
+        >
+          Developed &amp; maintained by{' '}
+          <span className="font-semibold" style={{ color: '#C4161C' }}>P N V Krishna</span>
+          {' '}· © {new Date().getFullYear()} Chantabbai FileDrop
+        </p>
+      </footer>
     </>
   )
 }
